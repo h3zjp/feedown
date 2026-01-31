@@ -38,8 +38,6 @@ const DashboardPage = () => {
   const loadMoreRef = useRef(null);
   const loadMoreObserverRef = useRef(null);
   const fullyViewedArticles = useRef(new Set()); // Track articles that were 100% visible
-  const pendingReadQueue = useRef(new Set()); // Queue for batch read marks
-  const debounceTimerRef = useRef(null); // Debounce timer for batch API
   const handleRefreshRef = useRef(null); // Ref to always get latest handleRefresh
 
   const apiClient = useMemo(() => createApiClient(
@@ -49,54 +47,17 @@ const DashboardPage = () => {
 
   const api = useMemo(() => new FeedOwnAPI(apiClient), [apiClient]);
 
-  // Debounced batch mark as read
-  const flushReadQueue = useCallback(async () => {
-    if (pendingReadQueue.current.size === 0) return;
-
-    const articleIds = Array.from(pendingReadQueue.current);
-    pendingReadQueue.current.clear();
-
-    try {
-      await api.articles.batchMarkAsRead(articleIds);
-      // Update local state
-      setReadArticles(prev => {
-        const newSet = new Set(prev);
-        articleIds.forEach(id => newSet.add(id));
-        return newSet;
-      });
-    } catch (error) {
-      console.error('Failed to batch mark as read:', error);
-      // Re-add failed IDs to queue for retry
-      articleIds.forEach(id => pendingReadQueue.current.add(id));
-    }
-  }, [api, setReadArticles]);
-
-  const queueMarkAsRead = useCallback((articleId) => {
-    pendingReadQueue.current.add(articleId);
+  // Simple mark as read
+  const markAsRead = useCallback(async (articleId) => {
     // Update UI immediately (optimistic)
     setReadArticles(prev => new Set([...prev, articleId]));
 
-    // Debounce: flush queue after 500ms of no new additions
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+    try {
+      await api.articles.markAsRead(articleId);
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
     }
-    debounceTimerRef.current = setTimeout(() => {
-      flushReadQueue();
-    }, 500);
-  }, [flushReadQueue, setReadArticles]);
-
-  // Cleanup debounce timer and flush on unmount
-  useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      // Flush any remaining items
-      if (pendingReadQueue.current.size > 0) {
-        flushReadQueue();
-      }
-    };
-  }, [flushReadQueue]);
+  }, [api, setReadArticles]);
 
   const fetchFeeds = useCallback(async () => {
     try {
@@ -322,13 +283,13 @@ const DashboardPage = () => {
           // Mark as read when scrolled past (50% or less visible) after being fully viewed
           if (entry.isIntersecting && entry.intersectionRatio <= 0.5 && fullyViewedArticles.current.has(articleId)) {
             fullyViewedArticles.current.delete(articleId);
-            queueMarkAsRead(articleId);
+            markAsRead(articleId);
           }
 
           // Also mark as read when completely leaving viewport after being fully viewed
           if (!entry.isIntersecting && fullyViewedArticles.current.has(articleId)) {
             fullyViewedArticles.current.delete(articleId);
-            queueMarkAsRead(articleId);
+            markAsRead(articleId);
           }
         });
       },
@@ -347,7 +308,7 @@ const DashboardPage = () => {
         observerRef.current.disconnect();
       }
     };
-  }, [filteredArticles, readArticles, queueMarkAsRead, filter]);
+  }, [filteredArticles, readArticles, markAsRead, filter]);
 
   // Setup Intersection Observer for infinite scroll
   useEffect(() => {
@@ -412,7 +373,7 @@ const DashboardPage = () => {
 
     // Mark as read when opening modal (uses debounced batch API)
     if (!readArticles.has(article.id)) {
-      queueMarkAsRead(article.id);
+      markAsRead(article.id);
     }
   };
 
@@ -422,7 +383,7 @@ const DashboardPage = () => {
 
   const handleMarkAsRead = () => {
     if (!selectedArticle) return;
-    queueMarkAsRead(selectedArticle.id);
+    markAsRead(selectedArticle.id);
   };
 
   const handleToggleFavorite = async () => {
