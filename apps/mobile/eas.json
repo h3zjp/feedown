@@ -24,6 +24,9 @@
     "production": {
       "extends": "base",
       "channel": "production",
+      "ios": {
+        "autoIncrement": true
+      },
       "android": {
         "autoIncrement": true
       }
