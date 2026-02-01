@@ -159,6 +159,15 @@ export default function Home() {
     navigation.navigate('ArticleDetail', { article })
   }, [navigation])
 
+  // Handle long press to mark as read
+  const handleLongPress = useCallback((article) => {
+    const isRead = readArticles.has(article.id)
+    if (!isRead) {
+      markAsRead(article.id)
+      showToast({ title: 'Marked as read', body: article.title })
+    }
+  }, [readArticles, markAsRead])
+
   // Get relative time string
   const getRelativeTime = (dateString) => {
     if (!dateString) return ''
@@ -197,6 +206,7 @@ export default function Home() {
       <TouchableOpacity
         style={[styles.articleCard, { backgroundColor: theme.card }, isRead && styles.articleCardRead]}
         onPress={() => handleArticlePress(article)}
+        onLongPress={() => handleLongPress(article)}
         activeOpacity={0.7}
       >
         {article.imageUrl ? (

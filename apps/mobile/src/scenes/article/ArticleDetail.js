@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   contentContainer: {
-    paddingBottom: 100,
+    paddingBottom: 180,
   },
   heroImage: {
     width: '100%',
