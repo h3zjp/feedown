@@ -69,7 +69,7 @@ export default function QrScanner() {
             Camera permission is required to scan QR codes.
           </Text>
           <TouchableOpacity style={styles.button} onPress={requestPermission}>
-            <Text style={styles.buttonText}>Grant Permission</Text>
+            <Text style={styles.buttonText}>Continue</Text>
           </TouchableOpacity>
         </View>
       </ScreenTemplate>
