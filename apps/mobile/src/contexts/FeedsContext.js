@@ -69,26 +69,28 @@ export const FeedsContextProvider = ({ children }) => {
 
         setHasMore(hasMoreData)
 
-        // Build read articles set - preserve local reads for fetched articles
-        const fetchedArticleIds = new Set(newArticles.map(a => a.id))
-        const readSet = new Set()
-
-        // Add articles marked as read on server
-        newArticles.forEach(article => {
-          if (article.isRead) {
-            readSet.add(article.id)
-          }
-        })
-
-        // Preserve local reads that are still in the fetched articles
-        // This prevents losing read status when API hasn't synced yet
-        readArticles.forEach(id => {
-          if (fetchedArticleIds.has(id)) {
-            readSet.add(id)
-          }
-        })
-
-        setReadArticles(readSet)
+        // Build read articles set
+        if (reset) {
+          // Full reset: rebuild from fetched articles only
+          const readSet = new Set()
+          newArticles.forEach(article => {
+            if (article.isRead) {
+              readSet.add(article.id)
+            }
+          })
+          setReadArticles(readSet)
+        } else {
+          // Load more: preserve existing read status and add new
+          setReadArticles(prev => {
+            const readSet = new Set(prev)
+            newArticles.forEach(article => {
+              if (article.isRead) {
+                readSet.add(article.id)
+              }
+            })
+            return readSet
+          })
+        }
 
         return newArticles
       } else {
