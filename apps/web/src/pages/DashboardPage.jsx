@@ -21,6 +21,7 @@ const DashboardPage = () => {
   const [focusedIndex, setFocusedIndex] = useState(-1); // keyboard-focused article row
   const [shortcutsOpen, setShortcutsOpen] = useState(false); // '?' help overlay
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('dashboardViewMode') || 'cards'); // 'cards' | 'compact'
+  const [loadMoreNode, setLoadMoreNode] = useState(null); // infinite-scroll sentinel, as state so the observer re-attaches when it mounts
   const [isWide, setIsWide] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : true
   ); // wide screens get the two-pane reading view
@@ -43,7 +44,6 @@ const DashboardPage = () => {
   } = useArticles();
   const observerRef = useRef(null);
   const articleRefs = useRef({});
-  const loadMoreRef = useRef(null);
   const loadMoreObserverRef = useRef(null);
   const fullyViewedArticles = useRef(new Set()); // Track articles that were 100% visible
   const handleRefreshRef = useRef(null); // Ref to always get latest handleRefresh
@@ -101,7 +101,8 @@ const DashboardPage = () => {
 
       if (response.success) {
         const newArticles = response.data.articles || [];
-        const hasMoreData = response.data.hasMore ?? (newArticles.length === limit);
+        // An empty page always ends pagination, otherwise offset would never advance
+        const hasMoreData = newArticles.length > 0 && (response.data.hasMore ?? newArticles.length === limit);
 
         if (reset) {
           setArticles(newArticles);
@@ -138,6 +139,38 @@ const DashboardPage = () => {
       }
     }
   }, [api, articles.length]);
+
+  // Pull the newest page and merge it into the list instead of replacing it.
+  // Articles are ordered newest-first, so prepending the fresh page and dropping
+  // its duplicates keeps the list a correct prefix of the server list - which is
+  // what the `articles.length` offset in fetchArticles relies on.
+  const mergeLatestArticles = useCallback(async (feedId = null) => {
+    try {
+      const response = await api.articles.list({ limit: 50, feedId: feedId || undefined });
+      if (!response.success) return;
+
+      const newArticles = response.data.articles || [];
+      if (newArticles.length === 0) return;
+
+      setArticles(prev => {
+        if (prev.length === 0) return newArticles;
+        const incoming = new Set(newArticles.map(article => article.id));
+        return [...newArticles, ...prev.filter(article => !incoming.has(article.id))];
+      });
+
+      setReadArticles(prev => {
+        const next = new Set(prev);
+        newArticles.forEach(article => {
+          if (article.isRead) next.add(article.id);
+        });
+        return next;
+      });
+
+      setLastArticleFetchTime(Date.now());
+    } catch (error) {
+      console.error('Failed to merge latest articles:', error);
+    }
+  }, [api, setArticles, setReadArticles, setLastArticleFetchTime]);
 
   const handleRefresh = useCallback(async () => {
     // Set loading state immediately for better UX
@@ -220,8 +253,8 @@ const DashboardPage = () => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        // Re-fetch articles without full refresh (just get latest data)
-        fetchArticles(true, selectedFeedId);
+        // Merge instead of reset so the pages infinite scroll already loaded survive
+        mergeLatestArticles(selectedFeedId);
       }
     };
 
@@ -229,7 +262,7 @@ const DashboardPage = () => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchArticles, selectedFeedId]);
+  }, [mergeLatestArticles, selectedFeedId]);
 
   // Auto-refresh RSS feeds every 15 minutes
   useEffect(() => {
@@ -340,10 +373,16 @@ const DashboardPage = () => {
     setFocusedIndex(-1);
   }, [filter, selectedFeedId]);
 
-  // Setup Intersection Observer for infinite scroll
+  // Setup Intersection Observer for infinite scroll.
+  // loadMoreNode is state (not a ref) because the sentinel mounts one commit after
+  // articles arrive - a ref would leave this effect with nothing to observe.
   useEffect(() => {
     if (loadMoreObserverRef.current) {
       loadMoreObserverRef.current.disconnect();
+    }
+
+    if (!loadMoreNode) {
+      return;
     }
 
     loadMoreObserverRef.current = new IntersectionObserver(
@@ -356,16 +395,14 @@ const DashboardPage = () => {
       { threshold: 0.1 }
     );
 
-    if (loadMoreRef.current) {
-      loadMoreObserverRef.current.observe(loadMoreRef.current);
-    }
+    loadMoreObserverRef.current.observe(loadMoreNode);
 
     return () => {
       if (loadMoreObserverRef.current) {
         loadMoreObserverRef.current.disconnect();
       }
     };
-  }, [hasMore, loadingMore, articlesLoading, selectedFeedId]);
+  }, [loadMoreNode, hasMore, loadingMore, articlesLoading, selectedFeedId, fetchArticles]);
 
   const handleMarkAllAsRead = async () => {
     if (articlesLoading) return;
@@ -1199,7 +1236,7 @@ const DashboardPage = () => {
 
               {/* Load more trigger for infinite scroll */}
               {filteredArticles.length > 0 && hasMore && (
-                <div ref={loadMoreRef} style={styles.loadMoreTrigger}>
+                <div ref={setLoadMoreNode} style={styles.loadMoreTrigger}>
                   {loadingMore && (
                     <div style={styles.loadingMore}>
                       <div style={styles.loadingSpinner}></div>
